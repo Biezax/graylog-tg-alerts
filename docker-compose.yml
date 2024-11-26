@@ -8,38 +8,12 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-    depends_on:
-      - redis
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  processor:
-    build: .
-    command: python processor.py
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-    depends_on:
-      - redis
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  redis:
-    image: redis:6-alpine
-    ports:
-      - "6379:6379"
     volumes:
-      - redis_data:/data    # Монтируем volume в директорию /data
+      - ./data:/app/data
+      - ./config:/app/config
     restart: unless-stopped
-    command: redis-server --appendonly yes  # Включаем persistence
-
-volumes:
-  redis_data:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
