@@ -23,25 +23,36 @@ class BacklogMessage(BaseModel):
     id: Optional[str]
     message: Optional[str]
 
+class Event(BaseModel):
+    id: Optional[str]
+    event_definition_type: Optional[str]
+    event_definition_id: Optional[str]
+    origin_context: Optional[str]
+    timestamp: Optional[str]
+    timestamp_processing: Optional[str]
+    timerange_start: Optional[str]
+    timerange_end: Optional[str]
+    streams: Optional[List[str]]
+    source_streams: Optional[List[str]]
+    message: str  # это обязательное поле
+    source: Optional[str]
+    key_tuple: Optional[List[str]]
+    key: Optional[str]
+    priority: Optional[int]
+    alert: Optional[bool]
+    fields: Optional[Dict[str, Any]]
+    group_by_fields: Optional[Dict[str, Any]]
+    replay_info: Optional[Any]
+
 class Alert(BaseModel):
     event_definition_id: Optional[str]
     event_definition_type: Optional[str]
-    event_title: Optional[str]
+    event_definition_title: Optional[str]
     event_definition_description: Optional[str]
     job_definition_id: Optional[str]
-    event_id: Optional[str]
-    event_origin_context: Optional[str]
-    event_timestamp_processing: Optional[str]
-    event_timerange_start: Optional[str]
-    event_timerange_end: Optional[str]
-    event_streams: Optional[str]
-    event_source_streams: Optional[str]
-    event_alert: Optional[str]
-    event_message: Optional[str]
-    event_source: Optional[str]
-    event_key: Optional[str]
-    event_priority: Optional[str]
-    backlog: Optional[List[BacklogMessage]]
+    job_trigger_id: Optional[str]
+    event: Event
+    backlog: Optional[List[BacklogMessage]] = []
 
 def load_message_template():
     with open("/app/config/message_template.txt", "r") as f:
@@ -177,15 +188,18 @@ async def shutdown_event():
 
 @app.post("/alert")
 async def create_alert(alert: Alert):
-    if not alert.event_alert:
-        alert.event_alert = "default"
-        logger.info("No event_alert specified, using default")
+    event_alert = alert.event_definition_id or "default"
+    alert_data = {
+        "event_alert": event_alert,
+        "message": alert.event.message,
+        "timerange_start": alert.event.timerange_start,
+        "timerange_end": alert.event.timerange_end,
+        "streams": alert.event.streams,
+        "backlog": alert.backlog
+    }
     
-    logger.info(f"Received alert: {alert.event_alert}")
-    
-    alert_data = alert.dict()
     if should_suppress_alert(alert_data):
-        logger.info(f"Alert {alert.event_alert} suppressed by schedule")
+        logger.info(f"Alert {event_alert} suppressed by schedule")
         return {"status": "suppressed"}
     
     current_time = datetime.now().timestamp()
@@ -193,30 +207,30 @@ async def create_alert(alert: Alert):
     cursor = conn.cursor()
     
     try:
-        config = ALERT_CONFIGS.get(alert.event_alert, ALERT_CONFIGS["default"])
+        config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
         if config["time_delay"] == 0 and config["closing_delay"] == 0:
-            logger.info(f"Immediate alert {alert.event_alert}, sending directly")
+            logger.info(f"Immediate alert {event_alert}, sending directly")
             template = load_message_template()
             message = template.safe_substitute(alert.dict())
             await send_telegram_message(message)
             return {"status": "sent"}
         
-        cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (alert.event_alert,))
+        cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (event_alert,))
         existing_alert = cursor.fetchone()
         
         if existing_alert:
-            logger.info(f"Updating existing alert: {alert.event_alert}")
+            logger.info(f"Updating existing alert: {event_alert}")
             cursor.execute("""
                 UPDATE alerts 
                 SET last_timestamp = ?, data = ?
                 WHERE event_alert = ?
-            """, (current_time, json.dumps(alert.dict()), alert.event_alert))
+            """, (current_time, json.dumps(alert.dict()), event_alert))
         else:
-            logger.info(f"Creating new alert: {alert.event_alert}")
+            logger.info(f"Creating new alert: {event_alert}")
             cursor.execute("""
                 INSERT INTO alerts (event_alert, data, last_timestamp, alert_sent)
                 VALUES (?, ?, ?, 0)
-            """, (alert.event_alert, json.dumps(alert.dict()), current_time))
+            """, (event_alert, json.dumps(alert.dict()), current_time))
         
         conn.commit()
         return {"status": "accepted"}
