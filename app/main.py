@@ -66,11 +66,17 @@ async def send_telegram_message(message: str):
             "text": message,
             "parse_mode": "HTML"
         }
-        async with session.post(url, json=params) as response:
-            if response.status != 200:
-                logger.error(f"Failed to send Telegram message. Status: {response.status}")
-                raise HTTPException(status_code=500, detail="Failed to send Telegram message")
-            logger.info(f"Successfully sent Telegram message")
+        try:
+            logger.debug(f"Sending Telegram message. URL: {url}, Params: {params}")
+            async with session.post(url, json=params) as response:
+                response_text = await response.text()
+                if response.status != 200:
+                    logger.error(f"Failed to send Telegram message. Status: {response.status}, Response: {response_text}")
+                    raise HTTPException(status_code=500, detail=f"Failed to send Telegram message: {response_text}")
+                logger.info(f"Successfully sent Telegram message. Response: {response_text}")
+        except Exception as e:
+            logger.error(f"Error while sending Telegram message: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to send Telegram message: {str(e)}")
 
 def get_weekday_number(weekday_name: str) -> int:
     weekdays = {
@@ -187,76 +193,97 @@ async def shutdown_event():
         logger.info("Alert processor stopped")
 
 def format_message(template: Template, data: dict) -> str:
-    message_parts = []
-    
-    message_parts.append(data['event']['message'])
-    
-    if data['event'].get('timerange_start'):
-        message_parts.append(f"\n🕒 Period: {data['event']['timerange_start']} - {data['event']['timerange_end']}")
-    
-    if data['event'].get('streams'):
-        message_parts.append(f"\n📊 Streams: {', '.join(data['event']['streams'])}")
-    
-    if data.get('backlog'):
-        message_parts.append("\n📝 Details:")
-        for msg in data['backlog']:
-            message_parts.append(msg['message'])
-    
-    return '\n'.join(message_parts)
+    try:
+        message_parts = []
+        
+        # Основное сообщение с HTML-экранированием
+        message = data['event']['message'].replace('<', '&lt;').replace('>', '&gt;')
+        message_parts.append(f"<b>{message}</b>")
+        
+        # Временной период
+        if data['event'].get('timerange_start'):
+            message_parts.append(f"\n🕒 Period: {data['event']['timerange_start']} - {data['event']['timerange_end']}")
+        
+        # Потоки
+        if data['event'].get('streams'):
+            streams = [str(s) for s in data['event']['streams']]
+            message_parts.append(f"\n📊 Streams: {', '.join(streams)}")
+        
+        # Бэклог с HTML-экранированием
+        if data.get('backlog'):
+            message_parts.append("\n📝 Details:")
+            for msg in data['backlog']:
+                backlog_message = msg['message'].replace('<', '&lt;').replace('>', '&gt;')
+                message_parts.append(f"<code>{backlog_message}</code>")
+        
+        formatted_message = '\n'.join(message_parts)
+        logger.debug(f"Formatted message: {formatted_message}")
+        return formatted_message
+    except Exception as e:
+        logger.error(f"Error formatting message: {str(e)}, Data: {data}")
+        raise
 
 @app.post("/alert")
 async def create_alert(alert: Alert):
-    event_alert = alert.event_definition_id or "default"
-    alert_data = {
-        "event_alert": event_alert,
-        "event": {
-            "message": alert.event.message,
-            "timerange_start": alert.event.timerange_start,
-            "timerange_end": alert.event.timerange_end,
-            "streams": alert.event.streams,
-        },
-        "backlog": [{"message": msg.message} for msg in alert.backlog] if alert.backlog else []
-    }
-    
-    if should_suppress_alert(alert_data):
-        logger.info(f"Alert {event_alert} suppressed by schedule")
-        return {"status": "suppressed"}
-    
-    current_time = datetime.now().timestamp()
-    conn = get_db()
-    cursor = conn.cursor()
-    
     try:
-        config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
-        if config["time_delay"] == 0 and config["closing_delay"] == 0:
-            logger.info(f"Immediate alert {event_alert}, sending directly")
-            template = load_message_template()
-            message = format_message(template, alert_data)
-            await send_telegram_message(message)
-            return {"status": "sent"}
+        event_alert = alert.event_definition_id or "default"
+        logger.debug(f"Processing alert: {event_alert}")
         
-        cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (event_alert,))
-        existing_alert = cursor.fetchone()
+        alert_data = {
+            "event_alert": event_alert,
+            "event": {
+                "message": alert.event.message,
+                "timerange_start": alert.event.timerange_start,
+                "timerange_end": alert.event.timerange_end,
+                "streams": alert.event.streams,
+            },
+            "backlog": [{"message": msg.message} for msg in alert.backlog] if alert.backlog else []
+        }
         
-        if existing_alert:
-            logger.info(f"Updating existing alert: {event_alert}")
-            cursor.execute("""
-                UPDATE alerts 
-                SET last_timestamp = ?, data = ?
-                WHERE event_alert = ?
-            """, (current_time, json.dumps(alert_data), event_alert))
-        else:
-            logger.info(f"Creating new alert: {event_alert}")
-            cursor.execute("""
-                INSERT INTO alerts (event_alert, data, last_timestamp, alert_sent)
-                VALUES (?, ?, ?, 0)
-            """, (event_alert, json.dumps(alert_data), current_time))
+        logger.debug(f"Alert data: {alert_data}")
         
-        conn.commit()
-        return {"status": "accepted"}
+        if should_suppress_alert(alert_data):
+            logger.info(f"Alert {event_alert} suppressed by schedule")
+            return {"status": "suppressed"}
         
+        current_time = datetime.now().timestamp()
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        try:
+            config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
+            if config["time_delay"] == 0 and config["closing_delay"] == 0:
+                logger.info(f"Immediate alert {event_alert}, sending directly")
+                template = load_message_template()
+                message = format_message(template, alert_data)
+                await send_telegram_message(message)
+                return {"status": "sent"}
+            
+            cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (event_alert,))
+            existing_alert = cursor.fetchone()
+            
+            if existing_alert:
+                logger.info(f"Updating existing alert: {event_alert}")
+                cursor.execute("""
+                    UPDATE alerts 
+                    SET last_timestamp = ?, data = ?
+                    WHERE event_alert = ?
+                """, (current_time, json.dumps(alert_data), event_alert))
+            else:
+                logger.info(f"Creating new alert: {event_alert}")
+                cursor.execute("""
+                    INSERT INTO alerts (event_alert, data, last_timestamp, alert_sent)
+                    VALUES (?, ?, ?, 0)
+                """, (event_alert, json.dumps(alert_data), current_time))
+            
+            conn.commit()
+            return {"status": "accepted"}
+            
+        except Exception as e:
+            logger.error(f"Error processing alert: {e}", exc_info=True)
+            raise
+        finally:
+            conn.close()
     except Exception as e:
-        logger.error(f"Error processing alert: {e}", exc_info=True)
-        raise
-    finally:
-        conn.close()
+        logger.error(f"Error in create_alert: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create alert: {str(e)}")
