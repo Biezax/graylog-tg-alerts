@@ -191,11 +191,13 @@ async def create_alert(alert: Alert):
     event_alert = alert.event_definition_id or "default"
     alert_data = {
         "event_alert": event_alert,
-        "message": alert.event.message,
-        "timerange_start": alert.event.timerange_start,
-        "timerange_end": alert.event.timerange_end,
-        "streams": alert.event.streams,
-        "backlog": alert.backlog
+        "event": {
+            "message": alert.event.message,
+            "timerange_start": alert.event.timerange_start,
+            "timerange_end": alert.event.timerange_end,
+            "streams": alert.event.streams,
+        },
+        "backlog": [{"message": msg.message} for msg in alert.backlog] if alert.backlog else []
     }
     
     if should_suppress_alert(alert_data):
@@ -211,7 +213,7 @@ async def create_alert(alert: Alert):
         if config["time_delay"] == 0 and config["closing_delay"] == 0:
             logger.info(f"Immediate alert {event_alert}, sending directly")
             template = load_message_template()
-            message = template.safe_substitute(alert.dict())
+            message = template.safe_substitute(alert_data)
             await send_telegram_message(message)
             return {"status": "sent"}
         
@@ -224,13 +226,13 @@ async def create_alert(alert: Alert):
                 UPDATE alerts 
                 SET last_timestamp = ?, data = ?
                 WHERE event_alert = ?
-            """, (current_time, json.dumps(alert.dict()), event_alert))
+            """, (current_time, json.dumps(alert_data), event_alert))
         else:
             logger.info(f"Creating new alert: {event_alert}")
             cursor.execute("""
                 INSERT INTO alerts (event_alert, data, last_timestamp, alert_sent)
                 VALUES (?, ?, ?, 0)
-            """, (event_alert, json.dumps(alert.dict()), current_time))
+            """, (event_alert, json.dumps(alert_data), current_time))
         
         conn.commit()
         return {"status": "accepted"}
