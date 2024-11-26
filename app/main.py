@@ -1,5 +1,5 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, Field, ValidationError
 from datetime import datetime, time
 import calendar
 import aiohttp
@@ -197,62 +197,79 @@ async def shutdown_event():
         logger.info("Alert processor stopped")
 
 @app.post("/alert")
-async def create_alert(alert: Alert):
-    event_alert = alert.event_definition_id or "default"
-    alert_data = {
-        "event_alert": event_alert,
-        "event_definition_title": alert.event_definition_title,
-        "event_definition_description": alert.event_definition_description,
-        "message": alert.event.message,
-        "timestamp": alert.event.timestamp,
-        "timerange_start": alert.event.timerange_start,
-        "timerange_end": alert.event.timerange_end,
-        "streams": alert.event.streams,
-        "source": alert.event.source,
-        "priority": alert.event.priority,
-        "fields": alert.event.fields,
-        "backlog": [msg.dict() for msg in alert.backlog] if alert.backlog else []
-    }
-    
-    if should_suppress_alert(alert_data):
-        logger.info(f"Alert {event_alert} suppressed by schedule")
-        return {"status": "suppressed"}
-    
-    current_time = datetime.now().timestamp()
-    conn = get_db()
-    cursor = conn.cursor()
+async def create_alert(request: Request):
+    # Получаем сырые данные из запроса
+    raw_data = await request.json()
+    logger.info("Received alert data:")
+    logger.info(json.dumps(raw_data, indent=2))
     
     try:
-        config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
-        if config["time_delay"] == 0 and config["closing_delay"] == 0:
-            logger.info(f"Immediate alert {event_alert}, sending directly")
-            template = load_message_template()
-            message = template.safe_substitute(alert_data)
-            await send_telegram_message(message)
-            return {"status": "sent"}
+        # Пробуем создать модель из данных
+        alert = Alert(**raw_data)
+        logger.info("Parsed alert data:")
+        logger.info(json.dumps(alert.dict(), indent=2))
+        event_alert = alert.event_definition_id or "default"
+        alert_data = {
+            "event_alert": event_alert,
+            "event_definition_title": alert.event_definition_title,
+            "event_definition_description": alert.event_definition_description,
+            "message": alert.event.message,
+            "timestamp": alert.event.timestamp,
+            "timerange_start": alert.event.timerange_start,
+            "timerange_end": alert.event.timerange_end,
+            "streams": alert.event.streams,
+            "source": alert.event.source,
+            "priority": alert.event.priority,
+            "fields": alert.event.fields,
+            "backlog": [msg.dict() for msg in alert.backlog] if alert.backlog else []
+        }
         
-        cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (event_alert,))
-        existing_alert = cursor.fetchone()
+        if should_suppress_alert(alert_data):
+            logger.info(f"Alert {event_alert} suppressed by schedule")
+            return {"status": "suppressed"}
         
-        if existing_alert:
-            logger.info(f"Updating existing alert: {event_alert}")
-            cursor.execute("""
-                UPDATE alerts 
-                SET last_timestamp = ?, data = ?
-                WHERE event_alert = ?
-            """, (current_time, json.dumps(alert_data), event_alert))
-        else:
-            logger.info(f"Creating new alert: {event_alert}")
-            cursor.execute("""
-                INSERT INTO alerts (event_alert, data, last_timestamp, alert_sent)
-                VALUES (?, ?, ?, 0)
-            """, (event_alert, json.dumps(alert_data), current_time))
+        current_time = datetime.now().timestamp()
+        conn = get_db()
+        cursor = conn.cursor()
         
-        conn.commit()
-        return {"status": "accepted"}
-        
+        try:
+            config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
+            if config["time_delay"] == 0 and config["closing_delay"] == 0:
+                logger.info(f"Immediate alert {event_alert}, sending directly")
+                template = load_message_template()
+                message = template.safe_substitute(alert_data)
+                await send_telegram_message(message)
+                return {"status": "sent"}
+            
+            cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (event_alert,))
+            existing_alert = cursor.fetchone()
+            
+            if existing_alert:
+                logger.info(f"Updating existing alert: {event_alert}")
+                cursor.execute("""
+                    UPDATE alerts 
+                    SET last_timestamp = ?, data = ?
+                    WHERE event_alert = ?
+                """, (current_time, json.dumps(alert_data), event_alert))
+            else:
+                logger.info(f"Creating new alert: {event_alert}")
+                cursor.execute("""
+                    INSERT INTO alerts (event_alert, data, last_timestamp, alert_sent)
+                    VALUES (?, ?, ?, 0)
+                """, (event_alert, json.dumps(alert_data), current_time))
+            
+            conn.commit()
+            return {"status": "accepted"}
+            
+        except Exception as e:
+            logger.error(f"Error processing alert: {e}", exc_info=True)
+            raise
+        finally:
+            conn.close()
+    except ValidationError as e:
+        logger.error("Validation error:")
+        logger.error(str(e))
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        logger.error(f"Error processing alert: {e}", exc_info=True)
+        logger.error(f"Unexpected error: {str(e)}")
         raise
-    finally:
-        conn.close()
