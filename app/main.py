@@ -191,21 +191,21 @@ async def create_alert(alert: Alert):
     event_alert = alert.event_definition_id or "default"
     alert_data = {
         "event_alert": event_alert,
+        "event_definition_title": alert.event_definition_title,
+        "event_definition_description": alert.event_definition_description,
         "message": alert.event.message,
+        "timestamp": alert.event.timestamp,
         "timerange_start": alert.event.timerange_start,
         "timerange_end": alert.event.timerange_end,
         "streams": alert.event.streams,
-        "backlog": alert.backlog
+        "source": alert.event.source,
+        "priority": alert.event.priority,
+        "fields": alert.event.fields,
+        "backlog": [msg.dict() for msg in alert.backlog] if alert.backlog else []
     }
     
     if should_suppress_alert(alert_data):
         logger.info(f"Alert {event_alert} suppressed by schedule")
-        return {"status": "suppressed"}
-    
-    current_time = datetime.now().timestamp()
-    conn = get_db()
-    cursor = conn.cursor()
-    
     try:
         config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
         if config["time_delay"] == 0 and config["closing_delay"] == 0:
