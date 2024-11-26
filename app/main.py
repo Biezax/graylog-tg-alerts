@@ -13,7 +13,10 @@ import os
 import json
 from string import Template
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,  # Меняем уровень на DEBUG
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
@@ -198,16 +201,23 @@ async def shutdown_event():
 
 @app.post("/alert")
 async def create_alert(request: Request):
-    # Получаем сырые данные из запроса
-    raw_data = await request.json()
-    logger.info("Received alert data:")
-    logger.info(json.dumps(raw_data, indent=2))
-    
     try:
-        # Пробуем создать модель из данных
-        alert = Alert(**raw_data)
-        logger.info("Parsed alert data:")
-        logger.info(json.dumps(alert.dict(), indent=2))
+        raw_data = await request.json()
+        logger.debug("Raw request data: %s", json.dumps(raw_data, indent=2))
+        
+        # Добавляем более подробное логирование
+        logger.debug("Attempting to create Alert model")
+        try:
+            alert = Alert(**raw_data)
+        except ValidationError as ve:
+            logger.error("Validation error details: %s", str(ve))
+            raise HTTPException(
+                status_code=422,
+                detail=f"Validation error: {str(ve)}"
+            )
+        
+        logger.debug("Successfully created Alert model: %s", alert.dict())
+        
         event_alert = alert.event_definition_id or "default"
         alert_data = {
             "event_alert": event_alert,
@@ -271,5 +281,5 @@ async def create_alert(request: Request):
         logger.error(str(e))
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.exception("Unexpected error in create_alert")  # This will log the full traceback
         raise
