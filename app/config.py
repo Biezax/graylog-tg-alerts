@@ -33,5 +33,7 @@ SCHEDULE_CONFIGS = {
     for condition, config in schedule_config.items()
 }
 
+STREAMS_CONFIG = load_json_config('streams_config.json') or {}
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")

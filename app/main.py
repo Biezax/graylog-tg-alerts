@@ -8,7 +8,7 @@ from database import init_db, get_db
 import asyncio
 import logging
 from fastapi.background import BackgroundTasks
-from config import ALERT_CONFIGS, SCHEDULE_CONFIGS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import ALERT_CONFIGS, SCHEDULE_CONFIGS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, STREAMS_CONFIG
 import os
 import json
 from string import Template
@@ -196,20 +196,16 @@ def format_message(template: Template, data: dict) -> str:
     try:
         message_parts = []
         
-        # Основное сообщение с HTML-экранированием
         message = data['event']['message'].replace('<', '&lt;').replace('>', '&gt;')
         message_parts.append(f"<b>{message}</b>")
         
-        # Временной период
         if data['event'].get('timerange_start'):
             message_parts.append(f"\n🕒 Period: {data['event']['timerange_start']} - {data['event']['timerange_end']}")
         
-        # Потоки
         if data['event'].get('streams'):
-            streams = [str(s) for s in data['event']['streams']]
-            message_parts.append(f"\n📊 Streams: {', '.join(streams)}")
+            stream_names = [STREAMS_CONFIG.get(str(s), str(s)) for s in data['event']['streams']]
+            message_parts.append(f"\n📊 Streams: {', '.join(stream_names)}")
         
-        # Бэклог с HTML-экранированием
         if data.get('backlog'):
             message_parts.append("\n📝 Details:")
             for msg in data['backlog']:
