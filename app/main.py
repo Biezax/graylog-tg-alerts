@@ -1,6 +1,5 @@
-from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field, ValidationError
-import uvicorn
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from datetime import datetime, time
 import calendar
 import aiohttp
@@ -14,16 +13,10 @@ import os
 import json
 from string import Template
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-logging.getLogger("fastapi").setLevel(logging.DEBUG)
-logging.getLogger("uvicorn").setLevel(logging.DEBUG)
-
-app = FastAPI(debug=True)
+app = FastAPI()
 alert_processor_task = None
 
 class BacklogMessage(BaseModel):
@@ -31,45 +24,35 @@ class BacklogMessage(BaseModel):
     message: Optional[str]
 
 class Event(BaseModel):
-    id: Optional[str] = None
-    event_definition_type: Optional[str] = None
-    event_definition_id: Optional[str] = None
-    origin_context: Optional[str] = None
-    timestamp: Optional[str] = None
-    timestamp_processing: Optional[str] = None
-    timerange_start: Optional[str] = None
-    timerange_end: Optional[str] = None
-    streams: Optional[List[str]] = None
-    source_streams: Optional[List[str]] = None
-    message: str = Field(..., description="Alert message")  # Явно указываем что поле обязательное
-    source: Optional[str] = None
-    key_tuple: Optional[List[str]] = None
-    key: Optional[str] = None
-    priority: Optional[int] = None
-    alert: Optional[bool] = None
-    fields: Optional[Dict[str, Any]] = None
-    group_by_fields: Optional[Dict[str, Any]] = None
-    replay_info: Optional[Any] = None
+    id: Optional[str]
+    event_definition_type: Optional[str]
+    event_definition_id: Optional[str]
+    origin_context: Optional[str]
+    timestamp: Optional[str]
+    timestamp_processing: Optional[str]
+    timerange_start: Optional[str]
+    timerange_end: Optional[str]
+    streams: Optional[List[str]]
+    source_streams: Optional[List[str]]
+    message: str
+    source: Optional[str]
+    key_tuple: Optional[List[str]]
+    key: Optional[str]
+    priority: Optional[int]
+    alert: Optional[bool]
+    fields: Optional[Dict[str, Any]]
+    group_by_fields: Optional[Dict[str, Any]]
+    replay_info: Optional[Any]
 
 class Alert(BaseModel):
-    event_definition_id: Optional[str] = None
-    event_definition_type: Optional[str] = None
-    event_definition_title: Optional[str] = None
-    event_definition_description: Optional[str] = None
-    job_definition_id: Optional[str] = None
-    job_trigger_id: Optional[str] = None
+    event_definition_id: Optional[str]
+    event_definition_type: Optional[str]
+    event_definition_title: Optional[str]
+    event_definition_description: Optional[str]
+    job_definition_id: Optional[str]
+    job_trigger_id: Optional[str]
     event: Event
     backlog: Optional[List[BacklogMessage]] = []
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "event_definition_id": "test",
-                "event": {
-                    "message": "Test message"
-                }
-            }
-        }
 
 def load_message_template():
     with open("/app/config/message_template.txt", "r") as f:
@@ -204,91 +187,56 @@ async def shutdown_event():
         logger.info("Alert processor stopped")
 
 @app.post("/alert")
-async def create_alert(request: Request):
-    logger.debug("=== Starting new request processing ===")
+async def create_alert(alert: Alert):
+    event_alert = alert.event_definition_id or "default"
+    alert_data = {
+        "event_alert": event_alert,
+        "message": alert.event.message,
+        "timerange_start": alert.event.timerange_start,
+        "timerange_end": alert.event.timerange_end,
+        "streams": alert.event.streams,
+        "backlog": alert.backlog
+    }
     
-    # Получаем и логируем сырой запрос
-    body = await request.body()
-    logger.debug(f"Raw request body: {body.decode()}")
+    if should_suppress_alert(alert_data):
+        logger.info(f"Alert {event_alert} suppressed by schedule")
+        return {"status": "suppressed"}
+    
+    current_time = datetime.now().timestamp()
+    conn = get_db()
+    cursor = conn.cursor()
     
     try:
-        raw_data = await request.json()
-        logger.debug(f"Parsed JSON data: {json.dumps(raw_data, indent=2)}")
+        config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
+        if config["time_delay"] == 0 and config["closing_delay"] == 0:
+            logger.info(f"Immediate alert {event_alert}, sending directly")
+            template = load_message_template()
+            message = template.safe_substitute(alert.dict())
+            await send_telegram_message(message)
+            return {"status": "sent"}
         
-        # Проверяем структуру данных перед созданием модели
-        if not isinstance(raw_data, dict):
-            logger.error("Input is not a dictionary")
-            raise HTTPException(status_code=422, detail="Invalid input format")
-            
-        if 'event' not in raw_data:
-            logger.error("Missing 'event' in input data")
-            raise HTTPException(status_code=422, detail="Missing 'event' field")
-            
-        logger.debug("Creating Alert model...")
-        alert = Alert(**raw_data)
-        logger.debug(f"Alert model created successfully: {alert.dict()}")
+        cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (event_alert,))
+        existing_alert = cursor.fetchone()
         
-        event_alert = alert.event_definition_id or "default"
-        alert_data = {
-            "event_alert": event_alert,
-            "event_definition_title": alert.event_definition_title,
-            "event_definition_description": alert.event_definition_description,
-            "message": alert.event.message,
-            "timestamp": alert.event.timestamp,
-            "timerange_start": alert.event.timerange_start,
-            "timerange_end": alert.event.timerange_end,
-            "streams": alert.event.streams,
-            "source": alert.event.source,
-            "priority": alert.event.priority,
-            "fields": alert.event.fields,
-            "backlog": [msg.dict() for msg in alert.backlog] if alert.backlog else []
-        }
+        if existing_alert:
+            logger.info(f"Updating existing alert: {event_alert}")
+            cursor.execute("""
+                UPDATE alerts 
+                SET last_timestamp = ?, data = ?
+                WHERE event_alert = ?
+            """, (current_time, json.dumps(alert.dict()), event_alert))
+        else:
+            logger.info(f"Creating new alert: {event_alert}")
+            cursor.execute("""
+                INSERT INTO alerts (event_alert, data, last_timestamp, alert_sent)
+                VALUES (?, ?, ?, 0)
+            """, (event_alert, json.dumps(alert.dict()), current_time))
         
-        if should_suppress_alert(alert_data):
-            logger.info(f"Alert {event_alert} suppressed by schedule")
-            return {"status": "suppressed"}
+        conn.commit()
+        return {"status": "accepted"}
         
-        current_time = datetime.now().timestamp()
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        try:
-            config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
-            if config["time_delay"] == 0 and config["closing_delay"] == 0:
-                logger.info(f"Immediate alert {event_alert}, sending directly")
-                template = load_message_template()
-                message = template.safe_substitute(alert_data)
-                await send_telegram_message(message)
-                return {"status": "sent"}
-            
-            cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (event_alert,))
-            existing_alert = cursor.fetchone()
-            
-            if existing_alert:
-                logger.info(f"Updating existing alert: {event_alert}")
-                cursor.execute("""
-                    UPDATE alerts 
-                    SET last_timestamp = ?, data = ?
-                    WHERE event_alert = ?
-                """, (current_time, json.dumps(alert_data), event_alert))
-            else:
-                logger.info(f"Creating new alert: {event_alert}")
-                cursor.execute("""
-                    INSERT INTO alerts (event_alert, data, last_timestamp, alert_sent)
-                    VALUES (?, ?, ?, 0)
-                """, (event_alert, json.dumps(alert_data), current_time))
-            
-            conn.commit()
-            return {"status": "accepted"}
-            
-        except Exception as e:
-            logger.error(f"Error processing alert: {e}", exc_info=True)
-            raise
-        finally:
-            conn.close()
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
-    except ValidationError as e:
-        logger.error(f"Validation error: {str(e)}")
-        logger.error(f"Error details: {e.errors()}")
+    except Exception as e:
+        logger.error(f"Error processing alert: {e}", exc_info=True)
+        raise
+    finally:
+        conn.close()

@@ -10,7 +10,7 @@ services:
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
     volumes:
       - ./data:/app/data
-      - ./config:/app/config
+      - ./config:/app/config:ro
     restart: unless-stopped
     logging:
       driver: "json-file"
