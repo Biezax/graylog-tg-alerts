@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from datetime import datetime, time
 import calendar
 import aiohttp
@@ -34,7 +34,7 @@ class Event(BaseModel):
     timerange_end: Optional[str]
     streams: Optional[List[str]]
     source_streams: Optional[List[str]]
-    message: Optional[str]
+    message: str  # делаем обязательным
     source: Optional[str]
     key_tuple: Optional[List[str]]
     key: Optional[str]
@@ -53,14 +53,6 @@ class Alert(BaseModel):
     job_trigger_id: Optional[str]
     event: Event
     backlog: Optional[List[BacklogMessage]] = []
-    message: Optional[str]
-
-    class Config:
-        @validator('message', pre=True, always=True)
-        def set_message(cls, v, values):
-            if v is None and 'event' in values and values['event'] and values['event'].message:
-                return values['event'].message
-            return v or ""
 
 def load_message_template():
     with open("/app/config/message_template.txt", "r") as f:
