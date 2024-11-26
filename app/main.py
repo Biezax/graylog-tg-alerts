@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field
 from datetime import datetime, time
 import calendar
 import aiohttp
@@ -24,35 +24,45 @@ class BacklogMessage(BaseModel):
     message: Optional[str]
 
 class Event(BaseModel):
-    id: Optional[str]
-    event_definition_type: Optional[str]
-    event_definition_id: Optional[str]
-    origin_context: Optional[str]
-    timestamp: Optional[str]
-    timestamp_processing: Optional[str]
-    timerange_start: Optional[str]
-    timerange_end: Optional[str]
-    streams: Optional[List[str]]
-    source_streams: Optional[List[str]]
-    message: str  # делаем обязательным
-    source: Optional[str]
-    key_tuple: Optional[List[str]]
-    key: Optional[str]
-    priority: Optional[int]
-    alert: Optional[bool]
-    fields: Optional[Dict[str, Any]]
-    group_by_fields: Optional[Dict[str, Any]]
-    replay_info: Optional[Any]
+    id: Optional[str] = None
+    event_definition_type: Optional[str] = None
+    event_definition_id: Optional[str] = None
+    origin_context: Optional[str] = None
+    timestamp: Optional[str] = None
+    timestamp_processing: Optional[str] = None
+    timerange_start: Optional[str] = None
+    timerange_end: Optional[str] = None
+    streams: Optional[List[str]] = None
+    source_streams: Optional[List[str]] = None
+    message: str = Field(..., description="Alert message")  # Явно указываем что поле обязательное
+    source: Optional[str] = None
+    key_tuple: Optional[List[str]] = None
+    key: Optional[str] = None
+    priority: Optional[int] = None
+    alert: Optional[bool] = None
+    fields: Optional[Dict[str, Any]] = None
+    group_by_fields: Optional[Dict[str, Any]] = None
+    replay_info: Optional[Any] = None
 
 class Alert(BaseModel):
-    event_definition_id: Optional[str]
-    event_definition_type: Optional[str]
-    event_definition_title: Optional[str]
-    event_definition_description: Optional[str]
-    job_definition_id: Optional[str]
-    job_trigger_id: Optional[str]
+    event_definition_id: Optional[str] = None
+    event_definition_type: Optional[str] = None
+    event_definition_title: Optional[str] = None
+    event_definition_description: Optional[str] = None
+    job_definition_id: Optional[str] = None
+    job_trigger_id: Optional[str] = None
     event: Event
     backlog: Optional[List[BacklogMessage]] = []
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "event_definition_id": "test",
+                "event": {
+                    "message": "Test message"
+                }
+            }
+        }
 
 def load_message_template():
     with open("/app/config/message_template.txt", "r") as f:
