@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
+import uvicorn
 from datetime import datetime, time
 import calendar
 import aiohttp
@@ -14,12 +15,15 @@ import json
 from string import Template
 
 logging.basicConfig(
-    level=logging.DEBUG,  # Меняем уровень на DEBUG
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+logging.getLogger("fastapi").setLevel(logging.DEBUG)
+logging.getLogger("uvicorn").setLevel(logging.DEBUG)
+
+app = FastAPI(debug=True)
 alert_processor_task = None
 
 class BacklogMessage(BaseModel):
@@ -201,22 +205,28 @@ async def shutdown_event():
 
 @app.post("/alert")
 async def create_alert(request: Request):
+    logger.debug("=== Starting new request processing ===")
+    
+    # Получаем и логируем сырой запрос
+    body = await request.body()
+    logger.debug(f"Raw request body: {body.decode()}")
+    
     try:
         raw_data = await request.json()
-        logger.debug("Raw request data: %s", json.dumps(raw_data, indent=2))
+        logger.debug(f"Parsed JSON data: {json.dumps(raw_data, indent=2)}")
         
-        # Добавляем более подробное логирование
-        logger.debug("Attempting to create Alert model")
-        try:
-            alert = Alert(**raw_data)
-        except ValidationError as ve:
-            logger.error("Validation error details: %s", str(ve))
-            raise HTTPException(
-                status_code=422,
-                detail=f"Validation error: {str(ve)}"
-            )
-        
-        logger.debug("Successfully created Alert model: %s", alert.dict())
+        # Проверяем структуру данных перед созданием модели
+        if not isinstance(raw_data, dict):
+            logger.error("Input is not a dictionary")
+            raise HTTPException(status_code=422, detail="Invalid input format")
+            
+        if 'event' not in raw_data:
+            logger.error("Missing 'event' in input data")
+            raise HTTPException(status_code=422, detail="Missing 'event' field")
+            
+        logger.debug("Creating Alert model...")
+        alert = Alert(**raw_data)
+        logger.debug(f"Alert model created successfully: {alert.dict()}")
         
         event_alert = alert.event_definition_id or "default"
         alert_data = {
@@ -276,10 +286,9 @@ async def create_alert(request: Request):
             raise
         finally:
             conn.close()
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
     except ValidationError as e:
-        logger.error("Validation error:")
-        logger.error(str(e))
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        logger.exception("Unexpected error in create_alert")  # This will log the full traceback
-        raise
+        logger.error(f"Validation error: {str(e)}")
+        logger.error(f"Error details: {e.errors()}")
