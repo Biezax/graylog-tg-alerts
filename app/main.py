@@ -34,7 +34,7 @@ class Event(BaseModel):
     timerange_end: Optional[str]
     streams: Optional[List[str]]
     source_streams: Optional[List[str]]
-    message: str  # это обязательное поле
+    message: str
     source: Optional[str]
     key_tuple: Optional[List[str]]
     key: Optional[str]
