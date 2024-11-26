@@ -1,15 +1,7 @@
-<b>${event.message}</b>
+<b>$message</b>
 
-${if event.timerange_start}
-🕒 Period: ${event.timerange_start} - ${event.timerange_end}
-${endif}
+$period
 
-${if event.streams}
-📊 Streams: ${event.streams}
-${endif}
+$streams
 
-${if backlog}
-📝 Details:
-<code>${foreach backlog msg}${msg.message}
-${endfor}</code>
-${endif}
+$details

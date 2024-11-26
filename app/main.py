@@ -150,7 +150,7 @@ async def process_alerts():
                     if prev_alert and (last_timestamp - prev_alert[0]) / 60 < time_delay:
                         logger.info(f"Sending start message for alert: {event_alert}")
                         template = load_message_template()
-                        message = template.safe_substitute(alert_data)
+                        message = format_message(template, alert_data)
                         await send_telegram_message(message)
                         cursor.execute("""
                             UPDATE alerts 
@@ -186,6 +186,24 @@ async def shutdown_event():
         alert_processor_task.cancel()
         logger.info("Alert processor stopped")
 
+def format_message(template: Template, data: dict) -> str:
+    message_parts = []
+    
+    message_parts.append(data['event']['message'])
+    
+    if data['event'].get('timerange_start'):
+        message_parts.append(f"\n🕒 Period: {data['event']['timerange_start']} - {data['event']['timerange_end']}")
+    
+    if data['event'].get('streams'):
+        message_parts.append(f"\n📊 Streams: {', '.join(data['event']['streams'])}")
+    
+    if data.get('backlog'):
+        message_parts.append("\n📝 Details:")
+        for msg in data['backlog']:
+            message_parts.append(msg['message'])
+    
+    return '\n'.join(message_parts)
+
 @app.post("/alert")
 async def create_alert(alert: Alert):
     event_alert = alert.event_definition_id or "default"
@@ -213,7 +231,7 @@ async def create_alert(alert: Alert):
         if config["time_delay"] == 0 and config["closing_delay"] == 0:
             logger.info(f"Immediate alert {event_alert}, sending directly")
             template = load_message_template()
-            message = template.safe_substitute(alert_data)
+            message = format_message(template, alert_data)
             await send_telegram_message(message)
             return {"status": "sent"}
         
