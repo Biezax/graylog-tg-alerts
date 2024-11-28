@@ -20,6 +20,9 @@ def process_schedule_config(config):
             schedule['to'] = parse_time(schedule['to'])
     return config
 
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 ALERT_CONFIGS = load_json_config('alert_config.json') or {
     "time_delay": 0,
     "closing_delay": 0
@@ -31,5 +34,3 @@ SCHEDULE_CONFIGS = {
     for condition, config in schedule_config.items()
 }
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
