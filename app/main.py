@@ -195,35 +195,40 @@ def format_message(template: Template, data: dict) -> str:
     try:
         logger.info("=== FORMAT MESSAGE INPUT DATA ===")
         logger.info(json.dumps(data, indent=2, default=str))
-        logger.info("=== TEMPLATE VARIABLES ===")
         
         def sanitize(text):
             return str(text).replace('<', '&lt;').replace('>', '&gt;') if text else "N/A"
 
         template_vars = {}
         
-        # Собираем все поля из корня
+        # Обработка корневых полей
         for key, value in data.items():
-            if isinstance(value, dict):
-                for k, v in value.items():
-                    template_vars[k] = sanitize(v)
-            else:
+            if not isinstance(value, (dict, list)):
                 template_vars[key] = sanitize(value)
         
-        # Специальная обработка period, fields и details
+        # Обработка полей события
         if 'event' in data and isinstance(data['event'], dict):
             event = data['event']
+            for key, value in event.items():
+                if isinstance(value, list):
+                    template_vars[key] = ', '.join(str(x) for x in value) or "N/A"
+                else:
+                    template_vars[key] = sanitize(value)
+            
+            # Специальная обработка period
             if event.get('timerange_start') or event.get('timerange_end'):
                 template_vars['period'] = f"• Period: {event.get('timerange_start', 'N/A')} - {event.get('timerange_end', 'N/A')}"
             else:
                 template_vars['period'] = ""
                 
+            # Специальная обработка fields
             if event.get('fields'):
                 fields = [f"• {k}: {sanitize(v)}" for k, v in event['fields'].items()]
                 template_vars['fields'] = '\n'.join(fields)
             else:
                 template_vars['fields'] = "N/A"
         
+        # Обработка backlog
         if data.get('backlog'):
             details = ["📝 Backlog Details:"]
             details.extend(f"<code>{sanitize(msg['message'])}</code>" for msg in data['backlog'])
@@ -234,7 +239,10 @@ def format_message(template: Template, data: dict) -> str:
         logger.info("Template variables prepared:")
         logger.info(json.dumps(template_vars, indent=2))
         
+        # Удаляем лишние пустые строки
         result = template.safe_substitute(template_vars)
+        result = '\n'.join(line for line in result.splitlines() if line.strip())
+        
         logger.info("=== FINAL MESSAGE ===")
         logger.info(result)
         return result
