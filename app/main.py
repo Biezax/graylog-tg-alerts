@@ -193,33 +193,37 @@ async def shutdown_event():
 
 def format_message(template: Template, data: dict) -> str:
     try:
+        logger.info("=== FORMAT MESSAGE INPUT DATA ===")
+        logger.info(json.dumps(data, indent=2, default=str))
+        logger.info("=== TEMPLATE VARIABLES ===")
+        
         def sanitize(text):
             return str(text).replace('<', '&lt;').replace('>', '&gt;') if text else "N/A"
 
         template_vars = {}
         
+        # Собираем все поля из корня
         for key, value in data.items():
-            if not isinstance(value, dict):
-                template_vars[key] = sanitize(value)
-        
-        event = data.get('event', {})
-        for key, value in event.items():
-            if isinstance(value, (list, tuple)):
-                template_vars[key] = ', '.join(str(x) for x in value) or "N/A"
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    template_vars[k] = sanitize(v)
             else:
                 template_vars[key] = sanitize(value)
         
-        if event.get('timerange_start') or event.get('timerange_end'):
-            template_vars['period'] = f"• Period: {event.get('timerange_start', 'N/A')} - {event.get('timerange_end', 'N/A')}"
-        else:
-            template_vars['period'] = ""
-            
-        if event.get('fields'):
-            fields = [f"• {k}: {sanitize(v)}" for k, v in event['fields'].items()]
-            template_vars['fields'] = '\n'.join(fields)
-        else:
-            template_vars['fields'] = "N/A"
-            
+        # Специальная обработка period, fields и details
+        if 'event' in data and isinstance(data['event'], dict):
+            event = data['event']
+            if event.get('timerange_start') or event.get('timerange_end'):
+                template_vars['period'] = f"• Period: {event.get('timerange_start', 'N/A')} - {event.get('timerange_end', 'N/A')}"
+            else:
+                template_vars['period'] = ""
+                
+            if event.get('fields'):
+                fields = [f"• {k}: {sanitize(v)}" for k, v in event['fields'].items()]
+                template_vars['fields'] = '\n'.join(fields)
+            else:
+                template_vars['fields'] = "N/A"
+        
         if data.get('backlog'):
             details = ["📝 Backlog Details:"]
             details.extend(f"<code>{sanitize(msg['message'])}</code>" for msg in data['backlog'])
@@ -227,7 +231,13 @@ def format_message(template: Template, data: dict) -> str:
         else:
             template_vars['details'] = ""
 
-        return template.safe_substitute(template_vars)
+        logger.info("Template variables prepared:")
+        logger.info(json.dumps(template_vars, indent=2))
+        
+        result = template.safe_substitute(template_vars)
+        logger.info("=== FINAL MESSAGE ===")
+        logger.info(result)
+        return result
         
     except Exception as e:
         logger.error(f"Error formatting message: {str(e)}, Data: {data}")
@@ -237,20 +247,25 @@ def format_message(template: Template, data: dict) -> str:
 async def create_alert(alert: Alert):
     try:
         event_alert = alert.event_definition_id or "default"
-        logger.debug(f"Processing alert: {event_alert}")
+        logger.info("=== INCOMING ALERT DATA ===")
+        logger.info(json.dumps(alert.dict(), indent=2, default=str))
         
+        # Сохраняем все поля из алерта
         alert_data = {
-            "event_alert": event_alert,
-            "event": {
-                "message": alert.event.message,
-                "timerange_start": alert.event.timerange_start,
-                "timerange_end": alert.event.timerange_end,
-                "streams": alert.event.streams,
-            },
-            "backlog": [{"message": msg.message} for msg in alert.backlog] if alert.backlog else []
+            "event_definition_id": alert.event_definition_id,
+            "event_definition_type": alert.event_definition_type,
+            "event_definition_title": alert.event_definition_title,
+            "event_definition_description": alert.event_definition_description,
+            "job_definition_id": alert.job_definition_id,
+            "job_trigger_id": alert.job_trigger_id,
+            "event": alert.event.dict(),
+            "backlog": [msg.dict() for msg in alert.backlog] if alert.backlog else []
         }
         
-        logger.debug(f"Alert data: {alert_data}")
+        logger.info("=== PROCESSED ALERT DATA ===")
+        logger.info(json.dumps(alert_data, indent=2, default=str))
+        
+        logger.debug(f"Processing alert: {event_alert}")
         
         if should_suppress_alert(alert_data):
             logger.info(f"Alert {event_alert} suppressed by schedule")
