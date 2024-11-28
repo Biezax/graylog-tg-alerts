@@ -1,8 +1,30 @@
-<b>$message</b>
+<b>🚨 Alert: $event_definition_title</b>
 
+📝 Message: <b>$message</b>
+
+⚡️ Event Details:
+• Type: $event_definition_type
+• ID: $event_definition_id
+• Description: $event_definition_description
+• Job ID: $job_definition_id
+• Trigger: $job_trigger_id
+
+⏰ Time Information:
 $period
+• Processing: $timestamp_processing
+• Source: $source
 
-🔍 Source streams: $source_streams
-📊 Alert streams: $streams
+🔍 Stream Information:
+• Source streams: $source_streams
+• Alert streams: $streams
+
+🏷 Additional Information:
+• Priority: $priority
+• Alert: $alert
+• Key: $key
+• Origin: $origin_context
+
+🔧 Fields:
+$fields
 
 $details

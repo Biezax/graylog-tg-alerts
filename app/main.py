@@ -193,26 +193,42 @@ async def shutdown_event():
 
 def format_message(template: Template, data: dict) -> str:
     try:
-        message = data['event']['message'].replace('<', '&lt;').replace('>', '&gt;')
-        period = f"🕒 Period: {data['event']['timerange_start']} - {data['event']['timerange_end']}" if data['event'].get('timerange_start') else ""
+        def sanitize(text):
+            return str(text).replace('<', '&lt;').replace('>', '&gt;') if text else "N/A"
+
+        template_vars = {}
         
-        streams = ', '.join(data['event'].get('streams', []))
-        source_streams = ', '.join(data['event'].get('source_streams', []))
+        for key, value in data.items():
+            if not isinstance(value, dict):
+                template_vars[key] = sanitize(value)
         
-        details = []
+        event = data.get('event', {})
+        for key, value in event.items():
+            if isinstance(value, (list, tuple)):
+                template_vars[key] = ', '.join(str(x) for x in value) or "N/A"
+            else:
+                template_vars[key] = sanitize(value)
+        
+        if event.get('timerange_start') or event.get('timerange_end'):
+            template_vars['period'] = f"• Period: {event.get('timerange_start', 'N/A')} - {event.get('timerange_end', 'N/A')}"
+        else:
+            template_vars['period'] = ""
+            
+        if event.get('fields'):
+            fields = [f"• {k}: {sanitize(v)}" for k, v in event['fields'].items()]
+            template_vars['fields'] = '\n'.join(fields)
+        else:
+            template_vars['fields'] = "N/A"
+            
         if data.get('backlog'):
-            details.append("📝 Details:")
-            for msg in data['backlog']:
-                backlog_message = msg['message'].replace('<', '&lt;').replace('>', '&gt;')
-                details.append(f"<code>{backlog_message}</code>")
+            details = ["📝 Backlog Details:"]
+            details.extend(f"<code>{sanitize(msg['message'])}</code>" for msg in data['backlog'])
+            template_vars['details'] = '\n'.join(details)
+        else:
+            template_vars['details'] = ""
+
+        return template.safe_substitute(template_vars)
         
-        return template.safe_substitute(
-            message=message,
-            period=period,
-            streams=streams,
-            source_streams=source_streams,
-            details='\n'.join(details)
-        )
     except Exception as e:
         logger.error(f"Error formatting message: {str(e)}, Data: {data}")
         raise
