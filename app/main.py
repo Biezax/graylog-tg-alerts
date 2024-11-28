@@ -140,9 +140,8 @@ async def process_alerts():
             for alert in alerts:
                 event_alert, data, last_timestamp, alert_sent = alert
                 alert_data = json.loads(data)
-                config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
-                time_delay = config["time_delay"]
-                closing_delay = config["closing_delay"]
+                time_delay = ALERT_CONFIGS["time_delay"]
+                closing_delay = ALERT_CONFIGS["closing_delay"]
                 logger.debug(f"Processing alert: {event_alert} with delays: time={time_delay}, closing={closing_delay}")
                 
                 if not alert_sent and time_delay > 0:
@@ -246,14 +245,13 @@ async def create_alert(alert: Alert):
         cursor = conn.cursor()
         
         try:
-            config = ALERT_CONFIGS.get(event_alert, ALERT_CONFIGS["default"])
-            if config["time_delay"] == 0 and config["closing_delay"] == 0:
+            if ALERT_CONFIGS["time_delay"] == 0 and ALERT_CONFIGS["closing_delay"] == 0:
                 logger.info(f"Immediate alert {event_alert}, sending directly")
                 template = load_message_template()
                 message = format_message(template, alert_data)
                 await send_telegram_message(message)
                 return {"status": "sent"}
-            
+
             cursor.execute("SELECT * FROM alerts WHERE event_alert = ?", (event_alert,))
             existing_alert = cursor.fetchone()
             

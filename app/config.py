@@ -21,10 +21,8 @@ def process_schedule_config(config):
     return config
 
 ALERT_CONFIGS = load_json_config('alert_config.json') or {
-    "default": {
-        "time_delay": 0,
-        "closing_delay": 0
-    }
+    "time_delay": 0,
+    "closing_delay": 0
 }
 
 schedule_config = load_json_config('schedule_config.json') or {}
