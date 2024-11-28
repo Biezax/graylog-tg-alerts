@@ -8,7 +8,7 @@ from database import init_db, get_db
 import asyncio
 import logging
 from fastapi.background import BackgroundTasks
-from config import ALERT_CONFIGS, SCHEDULE_CONFIGS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, STREAMS_CONFIG
+from config import ALERT_CONFIGS, SCHEDULE_CONFIGS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 import os
 import json
 from string import Template
@@ -194,27 +194,26 @@ async def shutdown_event():
 
 def format_message(template: Template, data: dict) -> str:
     try:
-        message_parts = []
-        
         message = data['event']['message'].replace('<', '&lt;').replace('>', '&gt;')
-        message_parts.append(f"<b>{message}</b>")
+        period = f"🕒 Period: {data['event']['timerange_start']} - {data['event']['timerange_end']}" if data['event'].get('timerange_start') else ""
         
-        if data['event'].get('timerange_start'):
-            message_parts.append(f"\n🕒 Period: {data['event']['timerange_start']} - {data['event']['timerange_end']}")
+        streams = ', '.join(data['event'].get('streams', []))
+        source_streams = ', '.join(data['event'].get('source_streams', []))
         
-        if data['event'].get('streams'):
-            stream_names = [STREAMS_CONFIG.get(str(s), str(s)) for s in data['event']['streams']]
-            message_parts.append(f"\n📊 Streams: {', '.join(stream_names)}")
-        
+        details = []
         if data.get('backlog'):
-            message_parts.append("\n📝 Details:")
+            details.append("📝 Details:")
             for msg in data['backlog']:
                 backlog_message = msg['message'].replace('<', '&lt;').replace('>', '&gt;')
-                message_parts.append(f"<code>{backlog_message}</code>")
+                details.append(f"<code>{backlog_message}</code>")
         
-        formatted_message = '\n'.join(message_parts)
-        logger.debug(f"Formatted message: {formatted_message}")
-        return formatted_message
+        return template.safe_substitute(
+            message=message,
+            period=period,
+            streams=streams,
+            source_streams=source_streams,
+            details='\n'.join(details)
+        )
     except Exception as e:
         logger.error(f"Error formatting message: {str(e)}, Data: {data}")
         raise

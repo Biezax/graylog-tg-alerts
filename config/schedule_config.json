@@ -1,0 +1,32 @@
+{
+    "\"production\" in event.get(\"streams\", [])": {
+        "daily": [
+            {
+                "from": "23:00",
+                "to": "23:59"
+            },
+            {
+                "from": "00:00",
+                "to": "07:00"
+            }
+        ],
+        "monthly": [
+            {
+                "week": 3,
+                "weekday": "wednesday"
+            },
+            {
+                "week": -1,
+                "weekday": "friday"
+            }
+        ]
+    },
+    "\"test\" in event.get(\"streams\", []) and event.get(\"priority\") < 3": {
+        "daily": [
+            {
+                "from": "18:00",
+                "to": "09:00"
+            }
+        ]
+    }
+}

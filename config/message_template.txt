@@ -2,6 +2,7 @@
 
 $period
 
-$streams
+🔍 Source streams: $source_streams
+📊 Alert streams: $streams
 
 $details
