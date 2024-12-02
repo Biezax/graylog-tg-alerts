@@ -242,7 +242,12 @@ async def create_alert(alert: Alert):
     try:
         event_id = alert.event_definition_id
         if not event_id:
-            raise HTTPException(status_code=400, detail="event_definition_id is required")
+            error_message = "❌ <b>Error processing alert</b>\n\n"
+            error_message += "event_definition_id is missing in the alert data\n"
+            if alert.event_definition_title:
+                error_message += f"Alert title: {alert.event_definition_title}"
+            await send_telegram_message(error_message)
+            return {"status": "error", "detail": "event_definition_id is required"}
 
         logger.info("=== INCOMING ALERT DATA ===")
         logger.info(alert)
@@ -311,5 +316,10 @@ async def create_alert(alert: Alert):
             conn.close()
             
     except Exception as e:
+        error_message = "❌ <b>Error processing alert</b>\n\n"
+        error_message += f"Error: {str(e)}\n"
+        if alert and alert.event_definition_title:
+            error_message += f"Alert title: {alert.event_definition_title}"
+        await send_telegram_message(error_message)
         logger.error(f"Error in create_alert: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to create alert: {str(e)}")
+        return {"status": "error", "detail": str(e)}
