@@ -12,10 +12,13 @@ def init_db():
     
     c.execute('''
         CREATE TABLE alerts (
-            event_alert TEXT PRIMARY KEY,
-            data TEXT,
+            event_id TEXT PRIMARY KEY,
+            event_title TEXT,
+            start_date REAL,
+            end_date REAL,
             last_timestamp REAL,
-            alert_sent INTEGER DEFAULT 0
+            event_started INTEGER DEFAULT 0,
+            event_ended INTEGER DEFAULT 0
         )
     ''')
     conn.commit()
