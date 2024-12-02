@@ -262,14 +262,17 @@ async def create_alert(alert: Alert):
         current_time = datetime.now().timestamp()
         conn = get_db()
         cursor = conn.cursor()
+        template = load_message_template()
         
         try:
             cursor.execute("SELECT * FROM alerts WHERE event_id = ? AND event_ended = 0", (event_id,))
             existing_alert = cursor.fetchone()
-            template = load_message_template()
             
             if not existing_alert:
-                # Первое появление алерта
+                # Первое появление алерта - отправляем сообщение и регистрируем
+                message = format_message(template, alert.dict())
+                await send_telegram_message(message)
+                
                 cursor.execute("""
                     INSERT INTO alerts (
                         event_id, event_title, start_date, end_date,
@@ -283,16 +286,16 @@ async def create_alert(alert: Alert):
                     current_time
                 ))
                 conn.commit()
-                return {"status": "registered"}
+                return {"status": "first_sent_and_registered"}
             
             last_timestamp = existing_alert[4]
             time_diff = (current_time - last_timestamp) / 60
             event_started = existing_alert[5]
             
             if time_diff <= ALERT_CONFIGS["time_delay"] and not event_started:
-                # Второй алерт в пределах time_delay
-                message = format_message(template, alert.dict())
-                message = "🚨 <b>Beginning of a recurring event detected!</b>\n\n" + message
+                # Второй алерт в пределах time_delay - отправляем простое уведомление о начале
+                message = "🚨 <b>Beginning of a recurring event detected!</b>\n\n"
+                message += f"Event: {alert.event_definition_title}"
                 await send_telegram_message(message)
                 
                 cursor.execute("""
@@ -303,7 +306,7 @@ async def create_alert(alert: Alert):
                 conn.commit()
                 return {"status": "event_started"}
             
-            # Обновляем timestamp
+            # Просто обновляем timestamp для последующих сообщений
             cursor.execute("""
                 UPDATE alerts 
                 SET last_timestamp = ?
