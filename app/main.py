@@ -265,7 +265,11 @@ async def create_alert(alert: Alert):
         template = load_message_template()
         
         try:
-            cursor.execute("SELECT * FROM alerts WHERE event_id = ? AND event_ended = 0", (event_id,))
+            # Проверяем существование активного алерта (не завершенного)
+            cursor.execute("""
+                SELECT * FROM alerts 
+                WHERE event_id = ? AND event_ended = 0
+            """, (event_id,))
             existing_alert = cursor.fetchone()
             
             if not existing_alert:
