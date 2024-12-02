@@ -133,13 +133,15 @@ async def process_alerts():
             conn = get_db()
             cursor = conn.cursor()
             
-            cursor.execute("SELECT * FROM alerts WHERE event_ended = 0")
+            cursor.execute("""
+                SELECT * FROM alerts 
+                WHERE event_ended = 0 AND event_started = 1
+            """)
             alerts = cursor.fetchall()
-            logger.info(f"Found {len(alerts)} alerts to process")
+            logger.info(f"Found {len(alerts)} active started alerts to process")
             
             for alert in alerts:
                 event_id, start_date, event_title, end_date, last_timestamp, event_started, event_ended = alert
-                # Преобразуем строковые значения в float
                 start_date = float(start_date) if start_date else current_time
                 last_timestamp = float(last_timestamp) if last_timestamp else current_time
                 
