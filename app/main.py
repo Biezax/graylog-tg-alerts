@@ -138,7 +138,11 @@ async def process_alerts():
             logger.info(f"Found {len(alerts)} alerts to process")
             
             for alert in alerts:
-                event_id, event_title, start_date, end_date, last_timestamp, event_started, event_ended = alert
+                event_id, start_date, event_title, end_date, last_timestamp, event_started, event_ended = alert
+                # Преобразуем строковые значения в float
+                start_date = float(start_date) if start_date else current_time
+                last_timestamp = float(last_timestamp) if last_timestamp else current_time
+                
                 time_delay = ALERT_CONFIGS["time_delay"]
                 closing_delay = ALERT_CONFIGS["closing_delay"]
                 
@@ -147,8 +151,8 @@ async def process_alerts():
                     cursor.execute("""
                         UPDATE alerts 
                         SET event_ended = 1, end_date = ?
-                        WHERE event_id = ?
-                    """, (current_time, event_id))
+                        WHERE event_id = ? AND start_date = ?
+                    """, (current_time, event_id, start_date))
                     conn.commit()
                     
                     message = f"✅ <b>Event has ended</b>\n\n"
