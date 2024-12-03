@@ -15,10 +15,10 @@ def init_db():
             event_id TEXT,
             start_date REAL,
             event_title TEXT,
-            end_date REAL,
             last_timestamp REAL,
             event_started INTEGER DEFAULT 0,
             event_ended INTEGER DEFAULT 0,
+            first_message_id INTEGER,
             PRIMARY KEY (event_id, start_date)
         )
     ''')
