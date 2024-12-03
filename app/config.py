@@ -2,6 +2,8 @@ import os
 import json
 from datetime import time
 
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 def load_json_config(filename):
     config_path = f"/app/config/{filename}"
     if os.path.exists(config_path):
