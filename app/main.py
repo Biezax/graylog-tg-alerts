@@ -198,10 +198,18 @@ async def process_alerts():
 
 @app.on_event("startup")
 async def startup_event():
-    init_db()
-    global alert_processor_task
-    alert_processor_task = asyncio.create_task(process_alerts())
-    logger.info("Alert processor started")
+    try:
+        logger.info("Initializing application")
+        init_db()
+        logger.info("Database initialized")
+        
+        logger.info("Starting alert processor")
+        global alert_processor_task
+        alert_processor_task = asyncio.create_task(process_alerts())
+        logger.info("Alert processor started successfully")
+    except Exception as e:
+        logger.error(f"Error during startup: {e}", exc_info=True)
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
