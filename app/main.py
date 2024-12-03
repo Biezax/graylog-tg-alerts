@@ -8,12 +8,15 @@ from database import init_db, get_db
 import asyncio
 import logging
 from fastapi.background import BackgroundTasks
-from config import ALERT_CONFIGS, SCHEDULE_CONFIGS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import ALERT_CONFIGS, SCHEDULE_CONFIGS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LOG_LEVEL
 import os
 import json
 from string import Template
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL),
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
@@ -70,13 +73,14 @@ async def send_telegram_message(message: str, reply_to_message_id: int = None):
             params["reply_to_message_id"] = reply_to_message_id
             
         try:
-            logger.debug(f"Sending Telegram message. URL: {url}, Params: {params}")
+            logger.debug(f"Request params: {params}")  # Детали запроса в debug
             async with session.post(url, json=params) as response:
                 response_data = await response.json()
                 if response.status != 200:
                     logger.error(f"Failed to send Telegram message. Status: {response.status}, Response: {response_data}")
                     raise HTTPException(status_code=500, detail=f"Failed to send Telegram message: {response_data}")
-                logger.info(f"Successfully sent Telegram message. Response: {response_data}")
+                logger.info("Message sent successfully")  # Статус отправки в info
+                logger.debug(f"Telegram API response: {response_data}")  # Детали ответа в debug
                 return response_data.get('result', {}).get('message_id')
         except Exception as e:
             logger.error(f"Error while sending Telegram message: {str(e)}")
@@ -139,7 +143,7 @@ def should_suppress_alert(alert_data):
                 logger.info(f"Condition '{condition}' not matched")
                 
         except Exception as e:
-            logger.error(f"Error evaluating schedule condition '{condition}': {e}")
+            logger.error(f"Error evaluating schedule condition: {e}")
             continue
     
     logger.info("No suppress rules matched")
@@ -149,7 +153,7 @@ async def process_alerts():
     while True:
         try:
             current_time = datetime.now().timestamp()
-            logger.info("Starting alerts processing cycle")
+            logger.debug("Starting alerts processing cycle")
             
             conn = get_db()
             cursor = conn.cursor()
@@ -159,10 +163,10 @@ async def process_alerts():
                 WHERE event_ended = 0 AND event_started = 1
             """)
             alerts = cursor.fetchall()
-            logger.info(f"Found {len(alerts)} active started alerts to process")
+            logger.debug(f"Found {len(alerts)} active started alerts to process")
             
             for alert in alerts:
-                event_id, start_date, event_title, last_timestamp, event_started, event_ended = alert
+                event_id, start_date, event_title, last_timestamp, event_started, event_ended, first_message_id = alert
                 start_date = float(start_date) if start_date else current_time
                 last_timestamp = float(last_timestamp) if last_timestamp else current_time
                 
@@ -182,8 +186,9 @@ async def process_alerts():
                     message += f"No new alerts received for {time_delay + closing_delay} minutes.\n"
                     message += f"Event: {event_title}\n"
                     message += f"Duration: {datetime.fromtimestamp(start_date).strftime('%Y-%m-%d %H:%M:%S')} - {datetime.fromtimestamp(last_timestamp).strftime('%Y-%m-%d %H:%M:%S')}"
-                    await send_telegram_message(message)
-            
+                    logger.info(f"Sending end event message as reply to message {first_message_id}")
+                    await send_telegram_message(message, reply_to_message_id=first_message_id)
+
             conn.close()
             await asyncio.sleep(60)
             
@@ -206,8 +211,9 @@ async def shutdown_event():
 
 def format_message(template: Template, data: dict) -> str:
     try:
-        logger.info("=== FORMAT MESSAGE INPUT DATA ===")
-        logger.info(json.dumps(data, indent=2, default=str))
+        logger.info("Formatting message")  # Основное действие в info
+        logger.debug("=== MESSAGE INPUT DATA ===")  # Детальные данные в debug
+        logger.debug(json.dumps(data, indent=2, default=str))
         
         def sanitize(text):
             return str(text).replace('<', '&lt;').replace('>', '&gt;') if text else "N/A"
@@ -249,19 +255,18 @@ def format_message(template: Template, data: dict) -> str:
         else:
             template_vars['details'] = ""
 
-        logger.info("Template variables prepared:")
-        logger.info(json.dumps(template_vars, indent=2))
+        logger.debug("Template variables:")  # Детальные данные в debug
+        logger.debug(json.dumps(template_vars, indent=2))
         
-        # Удаляем лишние пустые строки
         result = template.safe_substitute(template_vars)
         result = '\n'.join(line for line in result.splitlines() if line.strip())
         
-        logger.info("=== FINAL MESSAGE ===")
-        logger.info(result)
+        logger.debug("=== FINAL MESSAGE ===")  # Детальные данные в debug
+        logger.debug(result)
         return result
         
     except Exception as e:
-        logger.error(f"Error formatting message: {str(e)}, Data: {data}")
+        logger.error(f"Error formatting message: {str(e)}")
         raise
 
 @app.post("/alert")
@@ -269,6 +274,7 @@ async def create_alert(alert: Alert):
     try:
         event_id = alert.event_definition_id
         if not event_id:
+            logger.error("Missing event_definition_id")
             error_message = "❌ <b>Error processing alert</b>\n\n"
             error_message += "event_definition_id is missing in the alert data\n"
             if alert.event_definition_title:
@@ -276,9 +282,9 @@ async def create_alert(alert: Alert):
             await send_telegram_message(error_message)
             return {"status": "error", "detail": "event_definition_id is required"}
 
-        logger.info("=== INCOMING ALERT DATA ===")
-        logger.info(alert)
-        logger.info(json.dumps(alert.dict(), indent=2, default=str))
+        logger.info(f"Processing alert: {event_id} - {alert.event_definition_title}")  # Основная информация в info
+        logger.debug("Alert data:")  # Детальные данные в debug
+        logger.debug(json.dumps(alert.dict(), indent=2, default=str))
         
         if ALERT_CONFIGS["time_delay"] == 0:
             template = load_message_template()
@@ -326,7 +332,7 @@ async def create_alert(alert: Alert):
             event_started = existing_alert[4]  # event_started
             first_message_id = existing_alert[6]  # first_message_id
             
-            logger.info(f"Checking alert: time_diff={time_diff}, event_started={event_started}, first_message_id={first_message_id}")
+            logger.debug(f"Checking alert: time_diff={time_diff}, event_started={event_started}, first_message_id={first_message_id}")
             
             if time_diff <= ALERT_CONFIGS["time_delay"] and not event_started:
                 # Второй алерт в пределах time_delay - отправляем уведомление о начале как ответ на первое сообщение
