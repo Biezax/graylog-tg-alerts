@@ -292,7 +292,7 @@ async def create_alert(alert: Alert):
         template = load_message_template()
         
         try:
-            # Пров��ряем существование активного алерта (не завершенного)
+            # Проверяем существование активного алерта (не завершенного)
             cursor.execute("""
                 SELECT * FROM alerts 
                 WHERE event_id = ? AND event_ended = 0
@@ -303,6 +303,7 @@ async def create_alert(alert: Alert):
                 # Первое появление алерта - отправляем сообщение и регистрируем
                 message = format_message(template, alert.dict())
                 message_id = await send_telegram_message(message)
+                logger.info(f"First alert message sent with ID: {message_id}")
                 
                 cursor.execute("""
                     INSERT INTO alerts (
@@ -320,22 +321,25 @@ async def create_alert(alert: Alert):
                 conn.commit()
                 return {"status": "first_sent_and_registered"}
             
-            last_timestamp = existing_alert[4]
+            last_timestamp = existing_alert[3]  # last_timestamp
             time_diff = (current_time - last_timestamp) / 60
-            event_started = existing_alert[5]
+            event_started = existing_alert[4]  # event_started
+            first_message_id = existing_alert[6]  # first_message_id
+            
+            logger.info(f"Checking alert: time_diff={time_diff}, event_started={event_started}, first_message_id={first_message_id}")
             
             if time_diff <= ALERT_CONFIGS["time_delay"] and not event_started:
                 # Второй алерт в пределах time_delay - отправляем уведомление о начале как ответ на первое сообщение
                 message = "🚨 <b>Beginning of a recurring event detected!</b>\n\n"
                 message += f"Event: {alert.event_definition_title}"
-                first_message_id = existing_alert[6]  # получаем ID первого сообщения
+                logger.info(f"Sending start event message as reply to message {first_message_id}")
                 await send_telegram_message(message, reply_to_message_id=first_message_id)
                 
                 cursor.execute("""
                     UPDATE alerts 
                     SET event_started = 1, last_timestamp = ?
-                    WHERE event_id = ?
-                """, (current_time, event_id))
+                    WHERE event_id = ? AND start_date = ?
+                """, (current_time, event_id, existing_alert[1]))
                 conn.commit()
                 return {"status": "event_started"}
             
@@ -343,8 +347,8 @@ async def create_alert(alert: Alert):
             cursor.execute("""
                 UPDATE alerts 
                 SET last_timestamp = ?
-                WHERE event_id = ?
-            """, (current_time, event_id))
+                WHERE event_id = ? AND start_date = ?
+            """, (current_time, event_id, existing_alert[1]))
             conn.commit()
             return {"status": "updated"}
             
