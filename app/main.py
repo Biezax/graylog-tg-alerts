@@ -73,14 +73,14 @@ async def send_telegram_message(message: str, reply_to_message_id: int = None):
             params["reply_to_message_id"] = reply_to_message_id
             
         try:
-            logger.debug(f"Request params: {params}")  # Детали запроса в debug
+            logger.debug(f"Request params: {params}")
             async with session.post(url, json=params) as response:
                 response_data = await response.json()
                 if response.status != 200:
                     logger.error(f"Failed to send Telegram message. Status: {response.status}, Response: {response_data}")
                     raise HTTPException(status_code=500, detail=f"Failed to send Telegram message: {response_data}")
-                logger.info("Message sent successfully")  # Статус отправки в info
-                logger.debug(f"Telegram API response: {response_data}")  # Детали ответа в debug
+                logger.info("Message sent successfully")
+                logger.debug(f"Telegram API response: {response_data}")
                 return response_data.get('result', {}).get('message_id')
         except Exception as e:
             logger.error(f"Error while sending Telegram message: {str(e)}")
@@ -219,8 +219,8 @@ async def shutdown_event():
 
 def format_message(template: Template, data: dict) -> str:
     try:
-        logger.info("Formatting message")  # Основное действие в info
-        logger.debug("=== MESSAGE INPUT DATA ===")  # Детальные данные в debug
+        logger.info("Formatting message")
+        logger.debug("=== MESSAGE INPUT DATA ===")
         logger.debug(json.dumps(data, indent=2, default=str))
         
         def sanitize(text):
@@ -263,13 +263,13 @@ def format_message(template: Template, data: dict) -> str:
         else:
             template_vars['details'] = ""
 
-        logger.debug("Template variables:")  # Детальные данные в debug
+        logger.debug("Template variables:")
         logger.debug(json.dumps(template_vars, indent=2))
         
         result = template.safe_substitute(template_vars)
         result = '\n'.join(line for line in result.splitlines() if line.strip())
         
-        logger.debug("=== FINAL MESSAGE ===")  # Детальные данные в debug
+        logger.debug("=== FINAL MESSAGE ===")
         logger.debug(result)
         return result
         
@@ -290,9 +290,18 @@ async def create_alert(alert: Alert):
             await send_telegram_message(error_message)
             return {"status": "error", "detail": "event_definition_id is required"}
 
-        logger.info(f"Processing alert: {event_id} - {alert.event_definition_title}")  # Основная информация в info
-        logger.debug("Alert data:")  # Детальные данные в debug
+        logger.info(f"Processing alert: {event_id} - {alert.event_definition_title}")
+        logger.debug("Alert data:")
         logger.debug(json.dumps(alert.dict(), indent=2, default=str))
+        
+        alert_data = {
+            "alert": alert.dict(),
+            "event": alert.event.dict() if alert.event else {}
+        }
+        logger.debug("Checking alert suppression rules")
+        if should_suppress_alert(alert_data):
+            logger.info(f"Alert {event_id} suppressed by rules")
+            return {"status": "suppressed"}
         
         if ALERT_CONFIGS["time_delay"] == 0:
             template = load_message_template()
@@ -335,10 +344,10 @@ async def create_alert(alert: Alert):
                 conn.commit()
                 return {"status": "first_sent_and_registered"}
             
-            last_timestamp = existing_alert[3]  # last_timestamp
+            last_timestamp = existing_alert[3]
             time_diff = (current_time - last_timestamp) / 60
-            event_started = existing_alert[4]  # event_started
-            first_message_id = existing_alert[6]  # first_message_id
+            event_started = existing_alert[4]
+            first_message_id = existing_alert[6]
             
             logger.debug(f"Checking alert: time_diff={time_diff}, event_started={event_started}, first_message_id={first_message_id}")
             
@@ -357,7 +366,6 @@ async def create_alert(alert: Alert):
                 conn.commit()
                 return {"status": "event_started"}
             
-            # Просто обновляем timestamp для последующих сообщений
             cursor.execute("""
                 UPDATE alerts 
                 SET last_timestamp = ?
