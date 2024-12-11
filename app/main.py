@@ -160,10 +160,10 @@ async def process_alerts():
             
             cursor.execute("""
                 SELECT * FROM alerts 
-                WHERE event_ended = 0 AND event_started = 1
+                WHERE event_ended = 0
             """)
             alerts = cursor.fetchall()
-            logger.debug(f"Found {len(alerts)} active started alerts to process")
+            logger.debug(f"Found {len(alerts)} active alerts to process")
             
             for alert in alerts:
                 event_id, start_date, event_title, last_timestamp, event_started, event_ended, first_message_id = alert
@@ -174,20 +174,28 @@ async def process_alerts():
                 closing_delay = ALERT_CONFIGS["closing_delay"]
                 
                 if (current_time - last_timestamp) / 60 >= (time_delay + closing_delay):
-                    logger.info(f"Alert {event_id} expired, marking as ended")
-                    cursor.execute("""
-                        UPDATE alerts 
-                        SET event_ended = 1
-                        WHERE event_id = ? AND start_date = ?
-                    """, (event_id, start_date))
+                    if event_started:
+                        logger.info(f"Started alert {event_id} expired, marking as ended")
+                        cursor.execute("""
+                            UPDATE alerts 
+                            SET event_ended = 1
+                            WHERE event_id = ? AND start_date = ?
+                        """, (event_id, start_date))
+                        
+                        message = f"✅ <b>Event has ended</b>\n\n"
+                        message += f"No new alerts received for {time_delay + closing_delay} minutes.\n"
+                        message += f"Event: {event_title}\n"
+                        message += f"Duration: {datetime.fromtimestamp(start_date).strftime('%Y-%m-%d %H:%M:%S')} - {datetime.fromtimestamp(last_timestamp).strftime('%Y-%m-%d %H:%M:%S')}"
+                        logger.info(f"Sending end event message as reply to message {first_message_id}")
+                        await send_telegram_message(message, reply_to_message_id=first_message_id)
+                    else:
+                        logger.info(f"Not started alert {event_id} expired, marking as started and ended")
+                        cursor.execute("""
+                            UPDATE alerts 
+                            SET event_started = 1, event_ended = 1
+                            WHERE event_id = ? AND start_date = ?
+                        """, (event_id, start_date))
                     conn.commit()
-                    
-                    message = f"✅ <b>Event has ended</b>\n\n"
-                    message += f"No new alerts received for {time_delay + closing_delay} minutes.\n"
-                    message += f"Event: {event_title}\n"
-                    message += f"Duration: {datetime.fromtimestamp(start_date).strftime('%Y-%m-%d %H:%M:%S')} - {datetime.fromtimestamp(last_timestamp).strftime('%Y-%m-%d %H:%M:%S')}"
-                    logger.info(f"Sending end event message as reply to message {first_message_id}")
-                    await send_telegram_message(message, reply_to_message_id=first_message_id)
 
             conn.close()
             await asyncio.sleep(60)
@@ -365,6 +373,35 @@ async def create_alert(alert: Alert):
                 """, (current_time, event_id, existing_alert[1]))
                 conn.commit()
                 return {"status": "event_started"}
+            
+            elif time_diff > ALERT_CONFIGS["time_delay"]:
+                # Закрываем старый алерт
+                cursor.execute("""
+                    UPDATE alerts 
+                    SET event_ended = 1
+                    WHERE event_id = ? AND start_date = ?
+                """, (event_id, existing_alert[1]))
+                
+                # Создаем новый алерт
+                message = format_message(template, alert.dict())
+                message_id = await send_telegram_message(message)
+                logger.info(f"Creating new alert with ID: {message_id}")
+                
+                cursor.execute("""
+                    INSERT INTO alerts (
+                        event_id, event_title, start_date,
+                        last_timestamp, event_started, event_ended,
+                        first_message_id
+                    ) VALUES (?, ?, ?, ?, 0, 0, ?)
+                """, (
+                    event_id, 
+                    alert.event_definition_title,
+                    current_time,
+                    current_time,
+                    message_id
+                ))
+                conn.commit()
+                return {"status": "first_sent_and_registered"}
             
             cursor.execute("""
                 UPDATE alerts 
