@@ -354,7 +354,7 @@ async def create_alert(alert: Alert):
             
             logger.debug(f"Checking alert: time_diff={time_diff}, event_started={event_started}, first_message_id={first_message_id}")
             
-            if time_diff <= ALERT_CONFIGS["time_delay"] and not event_started:
+            if not event_started:
                 # Второй алерт в пределах time_delay - отправляем уведомление о начале как ответ на первое сообщение
                 message = "🚨 <b>Beginning of a recurring event detected!</b>\n\n"
                 message += f"Event: {alert.event_definition_title}"
@@ -368,44 +368,6 @@ async def create_alert(alert: Alert):
                 """, (current_time, event_id, existing_alert[1]))
                 conn.commit()
                 return {"status": "event_started"}
-            
-            elif time_diff > ALERT_CONFIGS["time_delay"]:
-                # Если старый алерт был started, отправляем сообщение о его завершении
-                if event_started:
-                    end_message = f"✅ <b>Event has ended</b>\n\n"
-                    end_message += f"No new alerts received for {time_delay} minutes.\n"
-                    end_message += f"Event: {existing_alert[2]}\n"
-                    end_message += f"Duration: {datetime.fromtimestamp(existing_alert[1]).strftime('%Y-%m-%d %H:%M:%S')} - {datetime.fromtimestamp(last_timestamp).strftime('%Y-%m-%d %H:%M:%S')}"
-                    logger.info(f"Sending end event message as reply to message {first_message_id}")
-                    await send_telegram_message(end_message, reply_to_message_id=first_message_id)
-
-                # Закрываем старый алерт
-                cursor.execute("""
-                    UPDATE alerts 
-                    SET event_ended = 1
-                    WHERE event_id = ? AND start_date = ?
-                """, (event_id, existing_alert[1]))
-                
-                # Создаем новый алерт
-                message = format_message(template, alert.dict())
-                message_id = await send_telegram_message(message)
-                logger.info(f"Creating new alert with ID: {message_id}")
-                
-                cursor.execute("""
-                    INSERT INTO alerts (
-                        event_id, event_title, start_date,
-                        last_timestamp, event_started, event_ended,
-                        first_message_id
-                    ) VALUES (?, ?, ?, ?, 0, 0, ?)
-                """, (
-                    event_id, 
-                    alert.event_definition_title,
-                    current_time,
-                    current_time,
-                    message_id
-                ))
-                conn.commit()
-                return {"status": "first_sent_and_registered"}
             
             cursor.execute("""
                 UPDATE alerts 
