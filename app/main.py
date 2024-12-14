@@ -174,30 +174,23 @@ async def process_alerts():
                 closing_delay = ALERT_CONFIGS["closing_delay"]
                 
                 if (current_time - last_timestamp) / 60 >= (time_delay + closing_delay):
-                    message = None
                     if event_started:
                         logger.info(f"Started alert {event_id} expired, marking as ended")
                         message = f"✅ <b>Event has ended</b>\n\n"
                         message += f"No new alerts received for {time_delay + closing_delay} minutes.\n"
                         message += f"Event: {event_title}\n"
                         message += f"Duration: {datetime.fromtimestamp(start_date).strftime('%Y-%m-%d %H:%M:%S')} - {datetime.fromtimestamp(last_timestamp).strftime('%Y-%m-%d %H:%M:%S')}"
+                        logger.info(f"Sending end event message as reply to message {first_message_id}")
+                        await send_telegram_message(message, reply_to_message_id=first_message_id)
                     else:
-                        logger.info(f"Not started alert {event_id} expired, marking as started and ended")
-                        message = f"✅ <b>Event has ended</b>\n\n"
-                        message += f"Single occurrence detected.\n"
-                        message += f"Event: {event_title}\n"
-                        message += f"Time: {datetime.fromtimestamp(start_date).strftime('%Y-%m-%d %H:%M:%S')}"
+                        logger.info(f"Not started alert {event_id} expired, marking as ended")
 
                     cursor.execute("""
                         UPDATE alerts 
-                        SET event_started = 1, event_ended = 1
+                        SET event_ended = 1
                         WHERE event_id = ? AND start_date = ?
                     """, (event_id, start_date))
-                    
-                    if message:
-                        logger.info(f"Sending end event message as reply to message {first_message_id}")
-                        await send_telegram_message(message, reply_to_message_id=first_message_id)
-                    
+
             conn.commit()
             conn.close()
             await asyncio.sleep(60)
@@ -377,6 +370,15 @@ async def create_alert(alert: Alert):
                 return {"status": "event_started"}
             
             elif time_diff > ALERT_CONFIGS["time_delay"]:
+                # Если старый алерт был started, отправляем сообщение о его завершении
+                if event_started:
+                    end_message = f"✅ <b>Event has ended</b>\n\n"
+                    end_message += f"No new alerts received for {time_delay} minutes.\n"
+                    end_message += f"Event: {existing_alert[2]}\n"
+                    end_message += f"Duration: {datetime.fromtimestamp(existing_alert[1]).strftime('%Y-%m-%d %H:%M:%S')} - {datetime.fromtimestamp(last_timestamp).strftime('%Y-%m-%d %H:%M:%S')}"
+                    logger.info(f"Sending end event message as reply to message {first_message_id}")
+                    await send_telegram_message(end_message, reply_to_message_id=first_message_id)
+
                 # Закрываем старый алерт
                 cursor.execute("""
                     UPDATE alerts 
