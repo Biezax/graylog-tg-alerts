@@ -8,6 +8,7 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - ALERT_WEBHOOK_TOKEN=${ALERT_WEBHOOK_TOKEN}
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro

@@ -1,17 +1,24 @@
-import sqlite3
 import os
 
-DATABASE_PATH = "data/alerts.db"
+import aiosqlite
 
-def init_db():
+
+DATABASE_PATH = "data/alerts.db"
+DATABASE_TIMEOUT_SECONDS = 30
+DATABASE_BUSY_TIMEOUT_MS = 30000
+
+
+async def init_db() -> aiosqlite.Connection:
     os.makedirs("data", exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH)
-    c = conn.cursor()
-    
-    c.execute('DROP TABLE IF EXISTS alerts')
-    
-    c.execute('''
-        CREATE TABLE alerts (
+
+    connection = await aiosqlite.connect(DATABASE_PATH, timeout=DATABASE_TIMEOUT_SECONDS)
+    connection.row_factory = aiosqlite.Row
+
+    await connection.execute("PRAGMA journal_mode=WAL")
+    await connection.execute(f"PRAGMA busy_timeout = {DATABASE_BUSY_TIMEOUT_MS}")
+    await connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS alerts (
             event_id TEXT,
             start_date REAL,
             event_title TEXT,
@@ -21,9 +28,7 @@ def init_db():
             first_message_id INTEGER,
             PRIMARY KEY (event_id, start_date)
         )
-    ''')
-    conn.commit()
-    conn.close()
-
-def get_db():
-    return sqlite3.connect(DATABASE_PATH)
+        """
+    )
+    await connection.commit()
+    return connection

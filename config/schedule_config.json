@@ -1,5 +1,10 @@
-{
-    "\"production\" in event.get(\"streams\", [])": {
+[
+    {
+        "match": {
+            "streams_any": [
+                "production"
+            ]
+        },
         "daily": [
             {
                 "from": "23:00",
@@ -21,7 +26,13 @@
             }
         ]
     },
-    "\"test\" in event.get(\"streams\", []) and event.get(\"priority\") < 3": {
+    {
+        "match": {
+            "streams_any": [
+                "test"
+            ],
+            "priority_lt": 3
+        },
         "daily": [
             {
                 "from": "18:00",
@@ -29,4 +40,4 @@
             }
         ]
     }
-}
+]
